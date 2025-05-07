@@ -251,7 +251,7 @@ def calcula_savings(tarefas, custos_entre_tarefas, matriz_distancias, deposito, 
             if i >= j:
                 continue
 
-            # Verificar a capacidade antes de calcular savings
+
             if (t1['demanda'] + t2['demanda']) > capacidade_max:
                 continue  # Ignora savings onde a fusão das rotas excede a capacidade
 
@@ -323,6 +323,8 @@ def aplica_savings(rotas, savings, capacidade_max, tarefas, depot_node, matriz_p
 
 def orquestrar_clarke_wright(required_edges, required_arcs, required_vertices, depot_node, num_vehicles, capacity, matriz_distancias, matriz_predecessores, seed=None, shuffle=False):
     tarefas = extrair_tarefas(required_edges, required_arcs, required_vertices)
+    if(shuffle==True):
+        random.shuffle(tarefas)
     custos_entre_tarefas = calcula_custos_entre_tarefas(tarefas, matriz_distancias)
     rotas = inicializa_rotas(tarefas, num_vehicles, depot_node, capacity, matriz_predecessores)
     savings = calcula_savings(tarefas, custos_entre_tarefas, matriz_distancias, depot_node, capacidade_max=capacity)
@@ -407,7 +409,7 @@ def imprimir_resultados(rotas_finais, tarefas, matriz_distancias, optimal_value=
     print("\n- Rotas finais encontradas:\n")
     mostrar_caminho(rotas_finais, tarefas, matriz_distancias)
 
-# Função rodar_varias_vezes (modificada)
+
 def rodar_varias_vezes(required_edges, required_arcs, required_vertices, depot_node, num_vehicles, capacity, matriz_distancias, matriz_predecessores, num_execucoes=10000):
     melhor_custo = float('inf')
     melhor_seed = None
@@ -456,7 +458,7 @@ for file in folder.iterdir():
 
         custo_deterministico = custo_total_rotas(rotas_deterministicas, matriz_distancias)
 
-        # --- Rodar versão com aleatoriedade (múltiplas seeds) ---
+
         numExec = 100
         rotas_aleatorias, melhor_seed, custo_aleatorio = rodar_varias_vezes(
         required_edges=required_edges,

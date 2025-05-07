@@ -1,7 +1,5 @@
 import heapq
-import random
-from pathlib import Path
-
+import random as rd
 def read_file(file_path):
     with open(file_path, "r", encoding="utf-8") as file:
         lines = file.readlines()
@@ -235,15 +233,34 @@ def construir_rota_completa(tarefas, tarefa_indices, depot_node, matriz_predeces
     return rota
 
 
-def ordenar_savings(savings, seed=None):
-    """Ordena savings de forma aleatória controlada por seed."""
+def ordenar_savings_random(savings,seed=None):
     if seed is not None:
-        random.Random(seed).shuffle(savings)
-    else:
-        savings = sorted(savings, key=lambda x: x[1], reverse=True)
-    return savings
+        rd.seed(seed)
+        rd.shuffle(savings)
+    return sorted(savings, key=lambda x: x[1], reverse=True)
 
+def ordenar_savings(savings):
+    return sorted(savings, key=lambda x: x[1], reverse=True)
 
+def calcula_savings_random(tarefas, custos_entre_tarefas, matriz_distancias, deposito, capacidade_max,seed):
+    savings = []
+    for i, t1 in enumerate(tarefas):
+        for j, t2 in enumerate(tarefas):
+            if i >= j:
+                continue
+
+            # Verificar a capacidade antes de calcular savings
+            if (t1['demanda'] + t2['demanda']) > capacidade_max:
+                continue  # Ignora savings onde a fusão das rotas excede a capacidade
+
+            custo_i0 = matriz_distancias[deposito][t1['origem']]
+            custo_0j = matriz_distancias[t2['destino']][deposito] if t2['tipo'] != 'vertice' else matriz_distancias[t2['origem']][deposito]
+            saving = custo_i0 + custo_0j - custos_entre_tarefas[(i, j)]
+            savings.append(((i, j), saving))
+    
+    savings_ordenados = ordenar_savings_random(savings,seed)
+    return savings_ordenados
+            
 def calcula_savings(tarefas, custos_entre_tarefas, matriz_distancias, deposito, capacidade_max):
     savings = []
     for i, t1 in enumerate(tarefas):
@@ -319,22 +336,43 @@ def aplica_savings(rotas, savings, capacidade_max, tarefas, depot_node, matriz_p
                 rotas.append(nova_rota)
     return rotas
 
+def cria_seed(tarefas):
+    return rd.choice(range(len(tarefas)))
 
-
-def orquestrar_clarke_wright(required_edges, required_arcs, required_vertices, depot_node, num_vehicles, capacity, matriz_distancias, matriz_predecessores, seed=None, shuffle=False):
+def orquestrar_clarke_wright(required_edges, required_arcs, required_vertices, depot_node, num_vehicles, capacity, matriz_distancias, matriz_predecessores):
     tarefas = extrair_tarefas(required_edges, required_arcs, required_vertices)
     custos_entre_tarefas = calcula_custos_entre_tarefas(tarefas, matriz_distancias)
     rotas = inicializa_rotas(tarefas, num_vehicles, depot_node, capacity, matriz_predecessores)
     savings = calcula_savings(tarefas, custos_entre_tarefas, matriz_distancias, depot_node, capacidade_max=capacity)
-    savings_ordenados = ordenar_savings(savings, seed=seed)  # uso da seed
-    if(shuffle==True):
-        random.shuffle(savings_ordenados)
+    savings_ordenados = ordenar_savings(savings)
     rotas = aplica_savings(rotas, savings_ordenados, capacity, tarefas, depot_node, matriz_predecessores)
     return rotas, tarefas
 
+def escolhe_eficiente(eficiente):
+    eficiente_compara = [eficiente.sort()]
+    g = 0
+    while(min(eficiente_compara) != eficiente[g]):
+        g+=1
+            
+    return min(eficiente_compara),g
 
+def orquestra_clarke_wright_aleatorio(required_edges, required_arcs, required_vertices, depot_node, num_vehicles, capacity, matriz_distancias, matriz_predecessores):
+    tarefas = extrair_tarefas(required_edges, required_arcs, required_vertices)
+    eficiente = []
+    seeds =[]
+    rangeR = int(len(tarefas)/2)
+    for c in range(rangeR):
+        seed = cria_seed(tarefas)
+        seeds.append(seed)
+        custos_entre_tarefas = calcula_custos_entre_tarefas(tarefas, matriz_distancias)
+        rotas = inicializa_rotas(tarefas, num_vehicles, depot_node, capacity, matriz_predecessores)
+        saving = calcula_savings_random(tarefas, custos_entre_tarefas, matriz_distancias, depot_node, capacidade_max=capacity,seed=seed)
+        eficiente.append(saving)
+    mais_eficiente, id_seed_escolhida = escolhe_eficiente(eficiente)
+    rotas = aplica_savings(rotas,mais_eficiente, capacity, tarefas, depot_node, matriz_predecessores)
+    return rotas, tarefas, seeds[id_seed_escolhida]
 
-def mostrar_caminho(rotas, tarefas, matriz_distancias):
+def mostrar_caminho(rotas, tarefas):
     for idx, rota in enumerate(rotas):
         print(f"\nRota {idx + 1}:")
         
@@ -353,7 +391,6 @@ def mostrar_caminho(rotas, tarefas, matriz_distancias):
         
         # Mostra a demanda total da rota
         print(f"  Demanda total: {rota['demanda']}")
-        print(f"  Custo total: {custo_rota_especifica(rota, matriz_distancias)}")
 
 def custo_total_rotas(rotas, matriz_distancias):
     custo_total = 0
@@ -365,22 +402,72 @@ def custo_total_rotas(rotas, matriz_distancias):
             custo_total += matriz_distancias[origem][destino]
     return custo_total
 
-def custo_rota_especifica(rota, matriz_distancias):
+
+def melhoria_swap_entre_rotas(rotas, tarefas, matriz_distancias, deposito, capacidade_max):
+    melhoria = True
+    
+    while melhoria:
+        melhoria = False  # só será True se encontrarmos uma melhoria real
+        for i in range(len(rotas)):
+            for j in range(i + 1, len(rotas)):
+                rota_i = rotas[i]
+                rota_j = rotas[j]
+
+                for idx_i, tarefa_idx_i in enumerate(rota_i['tarefas']):
+                    for idx_j, tarefa_idx_j in enumerate(rota_j['tarefas']):
+                        tarefa_i = tarefas[tarefa_idx_i]
+                        tarefa_j = tarefas[tarefa_idx_j]
+
+                        # Demandas após a troca
+                        nova_demanda_i = rota_i['demanda'] - tarefa_i['demanda'] + tarefa_j['demanda']
+                        nova_demanda_j = rota_j['demanda'] - tarefa_j['demanda'] + tarefa_i['demanda']
+
+                        if nova_demanda_i > capacidade_max or nova_demanda_j > capacidade_max:
+                            continue  # troca inviável
+
+                        # Calcula o novo custo total das duas rotas após a troca
+                        nova_tarefas_i = rota_i['tarefas'][:]
+                        nova_tarefas_j = rota_j['tarefas'][:]
+                        nova_tarefas_i[idx_i] = tarefa_idx_j
+                        nova_tarefas_j[idx_j] = tarefa_idx_i
+
+                        custo_i_novo = custo_rota(nova_tarefas_i, tarefas, matriz_distancias, deposito)
+                        custo_j_novo = custo_rota(nova_tarefas_j, tarefas, matriz_distancias, deposito)
+
+                        custo_i_antigo = custo_rota(rota_i['tarefas'], tarefas, matriz_distancias, deposito)
+                        custo_j_antigo = custo_rota(rota_j['tarefas'], tarefas, matriz_distancias, deposito)
+
+                        if (custo_i_novo + custo_j_novo) < (custo_i_antigo + custo_j_antigo):
+                            # Aplica a troca
+                            print("\n\n\n\nTROCOU!!!!!!!!!!!!\n\n\n\n")
+                            rotas[i]['tarefas'] = nova_tarefas_i
+                            rotas[i]['demanda'] = nova_demanda_i
+                            rotas[j]['tarefas'] = nova_tarefas_j
+                            rotas[j]['demanda'] = nova_demanda_j
+                            melhoria = True
+    return rotas
+
+
+def custo_rota(lista_tarefas, tarefas, matriz_distancias, deposito):
+    """Calcula o custo de uma rota a partir de seus índices de tarefas."""
+    if not lista_tarefas:
+        return 0
+    
     custo_total = 0
-    rota_completa = rota['rota_completa']
-    
-    for i in range(len(rota_completa) - 1):
-        origem = rota_completa[i]
-        destino = rota_completa[i + 1]
-        custo_total += matriz_distancias[origem][destino]
-    
+    atual = deposito
+    for idx in lista_tarefas:
+        tarefa = tarefas[idx]
+        custo_total += matriz_distancias[atual][tarefa['origem']]
+        custo_total += tarefa['custo_servico']
+        atual = tarefa['destino']
+    custo_total += matriz_distancias[atual][deposito]
     return custo_total
 
-
-def imprimir_resultados(rotas_finais, tarefas, matriz_distancias, optimal_value=None, custo_melhorado=False):
+def imprimir_resultados(rotas_finais, tarefas, matriz_distancias, depot_node, aleatorio, seed_escolhido, optimal_value=None, custo_melhorado=False):
     # Cálculos antes da melhoria
     custo_solucao = custo_total_rotas(rotas_finais, matriz_distancias)
-    
+    if aleatorio == True:
+        print(f"\n |A seed escolhida para o processo aleatorio mais eficiente foi: {seed_escolhido}| ")
     # Imprime o número de tarefas
     print(f"\n\n⎧ Tarefas que deviam ser feitas: {len(required_arcs)+len(required_edges)+len(required_vertices)}")
     print(f"⎩ Tarefas feitas: {len(tarefas)}")
@@ -405,87 +492,45 @@ def imprimir_resultados(rotas_finais, tarefas, matriz_distancias, optimal_value=
         print(f"- Custo melhorado da solução: {custo_melhorado}")
     
     print("\n- Rotas finais encontradas:\n")
-    mostrar_caminho(rotas_finais, tarefas, matriz_distancias)
-
-# Função rodar_varias_vezes (modificada)
-def rodar_varias_vezes(required_edges, required_arcs, required_vertices, depot_node, num_vehicles, capacity, matriz_distancias, matriz_predecessores, num_execucoes=10000):
-    melhor_custo = float('inf')
-    melhor_seed = None
-    melhor_rotas = None
-    melhor_tarefas = None
-
-    for _ in range(num_execucoes):
-        seed = random.randint(0, 1_000_000)
-        rotas, tarefas = orquestrar_clarke_wright(required_edges, required_arcs, required_vertices,
-                                                  depot_node, num_vehicles, capacity,
-                                                  matriz_distancias, matriz_predecessores, seed=seed, shuffle=True)
-        custo = custo_total_rotas(rotas, matriz_distancias)
-
-        # Guarda a melhor solução (menor custo) encontrada durante todas as execuções
-        if custo < melhor_custo:
-            melhor_custo = custo
-            melhor_seed = seed
-            melhor_rotas = rotas
-            melhor_tarefas = tarefas
-
-    return melhor_rotas, melhor_seed, melhor_custo
+    mostrar_caminho(rotas_finais, tarefas)
 
     
-folder = Path('./Testes')
-dados_metricas = []
-det = 0
-ale = 0
 
-for file in folder.iterdir():
-    if file.is_file():
-        vertices, edges, arcs, required_vertices, required_edges, required_arcs, num_veicles, capacity, depot_node, optimal_value = read_file(file)
-        matriz_distancias = matriz_menores_distancias(vertices, edges, arcs)
-        matriz_pred = matriz_predecessores(vertices, edges, arcs)
 
-        # --- Rodar versão determinística (original) ---
-        rotas_deterministicas, tarefas = orquestrar_clarke_wright(
-            required_edges=required_edges,
-            required_arcs=required_arcs,
-            required_vertices=required_vertices,
-            depot_node=depot_node,
-            num_vehicles=num_veicles,
-            capacity=capacity,
-            matriz_distancias=matriz_distancias,
-            matriz_predecessores=matriz_pred
-        )
 
-        custo_deterministico = custo_total_rotas(rotas_deterministicas, matriz_distancias)
+#main
+print("Leia o READ.ME para colocar o arquivo em formato correto!!!")
+file_path = input("Digite o caminho/nome do arquivo .dat: ")
+vertices, edges, arcs, required_vertices, required_edges, required_arcs, num_veicles, capacity, depot_node, optimal_value = read_file(file_path)
+matriz_distancias = matriz_menores_distancias(vertices, edges, arcs)
+matriz_pred = matriz_predecessores(vertices, edges, arcs)
 
-        # --- Rodar versão com aleatoriedade (múltiplas seeds) ---
-        numExec = 100
-        rotas_aleatorias, melhor_seed, custo_aleatorio = rodar_varias_vezes(
-        required_edges=required_edges,
-        required_arcs=required_arcs,
-        required_vertices=required_vertices,
-        depot_node=depot_node,
-        num_vehicles=num_veicles,
-        capacity=capacity,
-        matriz_distancias=matriz_distancias,
-        matriz_predecessores=matriz_pred,
-        num_execucoes=numExec  # pode ajustar
+
+rotas_finais, tarefas = orquestrar_clarke_wright(
+    required_edges=required_edges,
+    required_arcs=required_arcs,
+    required_vertices=required_vertices,
+    depot_node=depot_node,
+    num_vehicles=num_veicles,
+    capacity=capacity,
+    matriz_distancias=matriz_distancias,
+    matriz_predecessores=matriz_pred
 )
+rotas_finais_random, tarefas_random, seed_escolhido = orquestra_clarke_wright_aleatorio(
+    required_edges=required_edges,
+    required_arcs=required_arcs,
+    required_vertices=required_vertices,
+    depot_node=depot_node,
+    num_vehicles=num_veicles,
+    capacity=capacity,
+    matriz_distancias=matriz_distancias,
+    matriz_predecessores=matriz_pred
+    )
 
-
-        custo_aleatorio = custo_total_rotas(rotas_aleatorias, matriz_distancias)
-
-        # --- Comparação final ---
-        print(f"\n{file}")
-        print(f"Custo Determinístico: {custo_deterministico}")
-        print(f"Custo Aleatório (melhor de {numExec}): {custo_aleatorio}")
-        print(f"Ótimo: {optimal_value}")
-        print(f"Seed: {melhor_seed}")
-        if(custo_aleatorio<custo_deterministico):
-            ale+=1
-        else:
-            det+=1
-
-print(f"det:{det}")
-print(f"ale:{ale}")
+tarefas = extrair_tarefas(required_edges, required_arcs, required_vertices)
+imprimir_resultados(rotas_finais, tarefas, matriz_distancias, depot_node, False, optimal_value, seed_escolhido)
+tarefas_random = extrair_tarefas(required_edges, required_arcs, required_vertices)
+imprimir_resultados(rotas_finais_random, tarefas, matriz_distancias, depot_node, True, optimal_value, seed_escolhido)
 
 
 

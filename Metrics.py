@@ -19,6 +19,10 @@ def read_file(file_path):
     depot_node = None
     optimal_value = None
 
+    IdRequireds = dict()
+    IdRequiredsEA = dict()
+    current_id = 1  # Contador de IDs
+
     for line in lines:
         line = line.strip()
 
@@ -77,6 +81,9 @@ def read_file(file_path):
                     aux = (node, (demand, s_cost))
                     required_vertices.add(aux) 
                     vertices.add(node)  
+                    IdRequireds[aux] = current_id
+                    current_id += 1
+
                 except ValueError:
                     continue  
 
@@ -92,6 +99,10 @@ def read_file(file_path):
                         demand = int(parts[4]) 
                         s_cost = int(parts[5]) 
                         required_edges.add((edge, (t_cost, demand, s_cost)))
+                        aux = (edge, (t_cost, demand, s_cost))
+                        IdRequiredsEA[aux] = current_id
+                        current_id += 1
+
                 except ValueError:
                     continue
 
@@ -106,13 +117,18 @@ def read_file(file_path):
                         demand = int(parts[4]) 
                         s_cost = int(parts[5]) 
                         required_arcs.add((arc, (t_cost, demand, s_cost)))
+                        aux=(arc, (t_cost, demand, s_cost))
+                        IdRequiredsEA[aux] = current_id
+                        current_id += 1
                 except ValueError:
                     continue
 
             elif section == "Err":
                 continue
 
-    return vertices, edges, arcs, required_vertices, required_edges, required_arcs, num_vehicles, capacity, depot_node, optimal_value
+    print(list(IdRequiredsEA.keys()))
+
+    return vertices, edges, arcs, required_vertices, required_edges, required_arcs, num_vehicles, capacity, depot_node, optimal_value, IdRequireds, IdRequiredsEA
 
 
 
@@ -334,9 +350,7 @@ def orquestrar_clarke_wright(required_edges, required_arcs, required_vertices, d
     rotas = aplica_savings(rotas, savings_ordenados, capacity, tarefas, depot_node, matriz_predecessores)
     return rotas, tarefas
 
-
-
-def mostrar_caminho(rotas, tarefas, matriz_distancias):
+def mostrar_caminho(rotas, tarefas, matriz_distancias, IdsRequireds, IdsRequiredsEA):
     for idx, rota in enumerate(rotas):
         print(f"\nRota {idx + 1}:")
         
@@ -348,14 +362,38 @@ def mostrar_caminho(rotas, tarefas, matriz_distancias):
         for tarefa_idx in rota['tarefas']:
             tarefa = tarefas[tarefa_idx]
             tipo = tarefa['tipo']
+
+            # Reconstrói a chave conforme o formato do dicionário correspondente
             if tipo == 'vertice':
-                print(f"    - {tipo} em {tarefa['origem']}, demanda {tarefa['demanda']}")
+                chave = (tarefa['origem'], (tarefa['demanda'], tarefa['custo_servico']))
+                id_tarefa = IdsRequireds.get(chave, "N/A")
+
+            elif tipo == 'edge':
+                u, v = min(tarefa['origem'], tarefa['destino']), max(tarefa['origem'], tarefa['destino'])
+                chave = ((u, v), (tarefa['t_cost'], tarefa['demanda'], tarefa['custo_servico']))
+                id_tarefa = IdsRequiredsEA.get(chave, "N/A")
+
+            elif tipo == 'arc':
+                chave = ((tarefa['origem'], tarefa['destino']), (tarefa['t_cost'], tarefa['demanda'], tarefa['custo_servico']))
+                id_tarefa = IdsRequiredsEA.get(chave, "N/A")
+
             else:
-                print(f"    - {tipo} de {tarefa['origem']} para {tarefa['destino']}, demanda {tarefa['demanda']}")
+                id_tarefa = "N/A"
+
+            # Exibe a tarefa com ID
+            if tipo == 'vertice':
+                print(f"    - ID {id_tarefa}: {tipo} em {tarefa['origem']}, demanda {tarefa['demanda']}")
+            else:
+                print(f"    - ID {id_tarefa}: {tipo} de {tarefa['origem']} para {tarefa['destino']}, demanda {tarefa['demanda']}")
         
         # Mostra a demanda total da rota
         print(f"  Demanda total: {rota['demanda']}")
         print(f"  Custo total: {custo_rota_especifica(rota, matriz_distancias)}")
+
+
+
+
+
 
 def custo_total_rotas(rotas, matriz_distancias):
     custo_total = 0
@@ -379,7 +417,7 @@ def custo_rota_especifica(rota, matriz_distancias):
     return custo_total
 
 
-def imprimir_resultados(rotas_finais, tarefas, matriz_distancias, optimal_value=None, custo_melhorado=False):
+def imprimir_resultados(rotas_finais, tarefas, matriz_distancias, IdsRequireds, IdsRequiredsEA, optimal_value=None, custo_melhorado=False):
     # Cálculos antes da melhoria
     custo_solucao = custo_total_rotas(rotas_finais, matriz_distancias)
     
@@ -407,7 +445,7 @@ def imprimir_resultados(rotas_finais, tarefas, matriz_distancias, optimal_value=
         print(f"- Custo melhorado da solução: {custo_melhorado}")
     
     print("\n- Rotas finais encontradas:\n")
-    mostrar_caminho(rotas_finais, tarefas, matriz_distancias)
+    mostrar_caminho(rotas_finais, tarefas, matriz_distancias, IdsRequireds, IdsRequiredsEA)
 
 
 def rodar_varias_vezes(required_edges, required_arcs, required_vertices, depot_node, num_vehicles, capacity, matriz_distancias, matriz_predecessores, num_execucoes=10000):
@@ -432,20 +470,15 @@ def rodar_varias_vezes(required_edges, required_arcs, required_vertices, depot_n
 
     return melhor_rotas, melhor_seed, melhor_custo
 
-    
-folder = Path('./Testes')
-dados_metricas = []
-det = 0
-ale = 0
 
-for file in folder.iterdir():
-    if file.is_file():
-        vertices, edges, arcs, required_vertices, required_edges, required_arcs, num_veicles, capacity, depot_node, optimal_value = read_file(file)
-        matriz_distancias = matriz_menores_distancias(vertices, edges, arcs)
-        matriz_pred = matriz_predecessores(vertices, edges, arcs)
+
+file="Testes/BHW8.dat"
+vertices, edges, arcs, required_vertices, required_edges, required_arcs, num_veicles, capacity, depot_node, optimal_value, IdsRequireds, IdsRequiredsEA = read_file(file)
+matriz_distancias = matriz_menores_distancias(vertices, edges, arcs)
+matriz_pred = matriz_predecessores(vertices, edges, arcs)
 
         # --- Rodar versão determinística (original) ---
-        rotas_deterministicas, tarefas = orquestrar_clarke_wright(
+rotas_deterministicas, tarefas = orquestrar_clarke_wright(
             required_edges=required_edges,
             required_arcs=required_arcs,
             required_vertices=required_vertices,
@@ -454,40 +487,10 @@ for file in folder.iterdir():
             capacity=capacity,
             matriz_distancias=matriz_distancias,
             matriz_predecessores=matriz_pred
-        )
-
-        custo_deterministico = custo_total_rotas(rotas_deterministicas, matriz_distancias)
-
-
-        numExec = 100
-        rotas_aleatorias, melhor_seed, custo_aleatorio = rodar_varias_vezes(
-        required_edges=required_edges,
-        required_arcs=required_arcs,
-        required_vertices=required_vertices,
-        depot_node=depot_node,
-        num_vehicles=num_veicles,
-        capacity=capacity,
-        matriz_distancias=matriz_distancias,
-        matriz_predecessores=matriz_pred,
-        num_execucoes=numExec  # pode ajustar
-)
-
-
-        custo_aleatorio = custo_total_rotas(rotas_aleatorias, matriz_distancias)
-
-        # --- Comparação final ---
-        print(f"\n{file}")
-        print(f"Custo Determinístico: {custo_deterministico}")
-        print(f"Custo Aleatório (melhor de {numExec}): {custo_aleatorio}")
-        print(f"Ótimo: {optimal_value}")
-        print(f"Seed: {melhor_seed}")
-        if(custo_aleatorio<custo_deterministico):
-            ale+=1
-        else:
-            det+=1
-
-print(f"det:{det}")
-print(f"ale:{ale}")
+    )
+print(file)
+tarefas = extrair_tarefas(required_edges, required_arcs, required_vertices)
+imprimir_resultados(rotas_deterministicas, tarefas, matriz_distancias, IdsRequireds, IdsRequiredsEA, optimal_value)
 
 
 

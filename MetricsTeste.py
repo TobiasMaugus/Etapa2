@@ -19,10 +19,6 @@ def read_file(file_path):
     depot_node = None
     optimal_value = None
 
-    IdRequireds = dict()
-    IdRequiredsEA = dict()
-    current_id = 1  # Contador de IDs
-
     for line in lines:
         line = line.strip()
 
@@ -81,9 +77,6 @@ def read_file(file_path):
                     aux = (node, (demand, s_cost))
                     required_vertices.add(aux) 
                     vertices.add(node)  
-                    IdRequireds[aux] = current_id
-                    current_id += 1
-
                 except ValueError:
                     continue  
 
@@ -99,10 +92,6 @@ def read_file(file_path):
                         demand = int(parts[4]) 
                         s_cost = int(parts[5]) 
                         required_edges.add((edge, (t_cost, demand, s_cost)))
-                        aux = (edge, (t_cost, demand, s_cost))
-                        IdRequiredsEA[aux] = current_id
-                        current_id += 1
-
                 except ValueError:
                     continue
 
@@ -117,16 +106,13 @@ def read_file(file_path):
                         demand = int(parts[4]) 
                         s_cost = int(parts[5]) 
                         required_arcs.add((arc, (t_cost, demand, s_cost)))
-                        aux=(arc, (t_cost, demand, s_cost))
-                        IdRequiredsEA[aux] = current_id
-                        current_id += 1
                 except ValueError:
                     continue
 
             elif section == "Err":
                 continue
 
-    return vertices, edges, arcs, required_vertices, required_edges, required_arcs, num_vehicles, capacity, depot_node, optimal_value, IdRequireds, IdRequiredsEA
+    return vertices, edges, arcs, required_vertices, required_edges, required_arcs, num_vehicles, capacity, depot_node, optimal_value
 
 
 
@@ -249,10 +235,9 @@ def construir_rota_completa(tarefas, tarefa_indices, depot_node, matriz_predeces
     return rota
 
 
-def ordenar_savings(savings, seed=None):
-    """Ordena savings de forma aleatória controlada por seed."""
-    if seed is not None:
-        random.Random(seed).shuffle(savings)
+def ordenar_savings(savings, rng=None):
+    if rng is not None:
+        rng.shuffle(savings)
     else:
         savings = sorted(savings, key=lambda x: x[1], reverse=True)
     return savings
@@ -265,29 +250,27 @@ def calcula_savings(tarefas, custos_entre_tarefas, matriz_distancias, deposito, 
             if i >= j:
                 continue
 
-
             if (t1['demanda'] + t2['demanda']) > capacidade_max:
-                continue  # Ignora savings onde a fusão das rotas excede a capacidade
+                continue
 
             custo_i0 = matriz_distancias[deposito][t1['origem']]
             custo_0j = matriz_distancias[t2['destino']][deposito] if t2['tipo'] != 'vertice' else matriz_distancias[t2['origem']][deposito]
             saving = custo_i0 + custo_0j - custos_entre_tarefas[(i, j)]
-            savings.append(((i, j), saving))
+            savings.append(((t1['id'], t2['id']), saving))
 
-    savings_ordenados = ordenar_savings(savings)  # Chama a função de ordenação
+    return savings
 
-    return savings_ordenados
 
 def inicializa_rotas(tarefas, num_vehicles, depot_node, capacity, matriz_predecessores):
     rotas = []
 
     if num_vehicles == -1:
-        for idx, tarefa in enumerate(tarefas):
+        for tarefa in tarefas:
             if tarefa['demanda'] > capacity:
                 continue
-            rota_completa = construir_rota_completa(tarefas, [idx], depot_node, matriz_predecessores)
+            rota_completa = construir_rota_completa(tarefas, [tarefa['id']], depot_node, matriz_predecessores)
             rotas.append({
-                'tarefas': [idx],
+                'tarefas': [tarefa['id']],
                 'demanda': tarefa['demanda'],
                 'rota_completa': rota_completa
             })
@@ -299,7 +282,7 @@ def inicializa_rotas(tarefas, num_vehicles, depot_node, capacity, matriz_predece
                 continue
             rota = rotas[idx % num_vehicles]
             if rota['demanda'] + tarefa['demanda'] <= capacity:
-                rota['tarefas'].append(idx)
+                rota['tarefas'].append(tarefa['id'])
                 rota['demanda'] += tarefa['demanda']
                 rota['rota_completa'] = construir_rota_completa(tarefas, rota['tarefas'], depot_node, matriz_predecessores)
 
@@ -307,48 +290,56 @@ def inicializa_rotas(tarefas, num_vehicles, depot_node, capacity, matriz_predece
 
 
 def pode_fundir_rotas(rota_i, rota_j, capacidade_max):
-    """Verifica se duas rotas podem ser fundidas sem ultrapassar a capacidade do veículo."""
     return (rota_i['demanda'] + rota_j['demanda']) <= capacidade_max
 
-def funde_rotas(rota_i, rota_j, tarefas, depot_node, matriz_predecessores):
+
+def funde_rotas(rota_i, rota_j, tarefas_dict, depot_node, matriz_predecessores):
     nova_tarefas = rota_i['tarefas'] + rota_j['tarefas']
     nova_rota = {
         'tarefas': nova_tarefas,
         'demanda': rota_i['demanda'] + rota_j['demanda'],
-        'rota_completa': construir_rota_completa(tarefas, nova_tarefas, depot_node, matriz_predecessores)
+        'rota_completa': construir_rota_completa(tarefas_dict, nova_tarefas, depot_node, matriz_predecessores)
     }
     return nova_rota
 
 
-def aplica_savings(rotas, savings, capacidade_max, tarefas, depot_node, matriz_predecessores):
-    for (i, j), _ in savings:
-        rota_i = next((r for r in rotas if r['tarefas'] and r['tarefas'][-1] == i), None)
-        rota_j = next((r for r in rotas if r['tarefas'] and r['tarefas'][0] == j), None)
+def aplica_savings(rotas, savings, capacidade_max, tarefas_dict, depot_node, matriz_predecessores):
+    for (id_i, id_j), _ in savings:
+        rota_i = next((r for r in rotas if r['tarefas'] and r['tarefas'][-1] == id_i), None)
+        rota_j = next((r for r in rotas if r['tarefas'] and r['tarefas'][0] == id_j), None)
 
         if rota_i and rota_j and rota_i != rota_j:
             if pode_fundir_rotas(rota_i, rota_j, capacidade_max):
-                nova_rota = funde_rotas(rota_i, rota_j, tarefas, depot_node, matriz_predecessores)
+                nova_rota = funde_rotas(rota_i, rota_j, tarefas_dict, depot_node, matriz_predecessores)
                 rotas.remove(rota_i)
                 rotas.remove(rota_j)
                 rotas.append(nova_rota)
     return rotas
 
 
-
 def orquestrar_clarke_wright(required_edges, required_arcs, required_vertices, depot_node, num_vehicles, capacity, matriz_distancias, matriz_predecessores, seed=None, shuffle=False):
+    rng = random.Random(seed) if seed is not None else None
+
     tarefas = extrair_tarefas(required_edges, required_arcs, required_vertices)
-    if(shuffle==True):
-        random.shuffle(tarefas)
+    for i, t in enumerate(tarefas):
+        t['id'] = i
+
+    if shuffle and rng:
+        rng.shuffle(tarefas)
+
+    tarefas_dict = {t['id']: t for t in tarefas}
+
     custos_entre_tarefas = calcula_custos_entre_tarefas(tarefas, matriz_distancias)
     rotas = inicializa_rotas(tarefas, num_vehicles, depot_node, capacity, matriz_predecessores)
     savings = calcula_savings(tarefas, custos_entre_tarefas, matriz_distancias, depot_node, capacidade_max=capacity)
-    savings_ordenados = ordenar_savings(savings, seed=seed)  # uso da seed
-    if(shuffle==True):
-        random.shuffle(savings_ordenados)
-    rotas = aplica_savings(rotas, savings_ordenados, capacity, tarefas, depot_node, matriz_predecessores)
+    savings_ordenados = ordenar_savings(savings, rng=rng)
+
+    rotas = aplica_savings(rotas, savings_ordenados, capacity, tarefas_dict, depot_node, matriz_predecessores)
     return rotas, tarefas
 
-def mostrar_caminho(rotas, tarefas, matriz_distancias, IdsRequireds, IdsRequiredsEA):
+
+
+def mostrar_caminho(rotas, tarefas, matriz_distancias):
     for idx, rota in enumerate(rotas):
         print(f"\nRota {idx + 1}:")
         
@@ -360,38 +351,14 @@ def mostrar_caminho(rotas, tarefas, matriz_distancias, IdsRequireds, IdsRequired
         for tarefa_idx in rota['tarefas']:
             tarefa = tarefas[tarefa_idx]
             tipo = tarefa['tipo']
-
-            # Reconstrói a chave conforme o formato do dicionário correspondente
             if tipo == 'vertice':
-                chave = (tarefa['origem'], (tarefa['demanda'], tarefa['custo_servico']))
-                id_tarefa = IdsRequireds.get(chave, "N/A")
-
-            elif tipo == 'edge':
-                u, v = min(tarefa['origem'], tarefa['destino']), max(tarefa['origem'], tarefa['destino'])
-                chave = ((u, v), (tarefa['t_cost'], tarefa['demanda'], tarefa['custo_servico']))
-                id_tarefa = IdsRequiredsEA.get(chave, "N/A")
-
-            elif tipo == 'arc':
-                chave = ((tarefa['origem'], tarefa['destino']), (tarefa['t_cost'], tarefa['demanda'], tarefa['custo_servico']))
-                id_tarefa = IdsRequiredsEA.get(chave, "N/A")
-
+                print(f"    - {tipo} em {tarefa['origem']}, demanda {tarefa['demanda']}")
             else:
-                id_tarefa = "N/A"
-
-            # Exibe a tarefa com ID
-            if tipo == 'vertice':
-                print(f"    - ID {id_tarefa}: {tipo} em {tarefa['origem']}, demanda {tarefa['demanda']}")
-            else:
-                print(f"    - ID {id_tarefa}: {tipo} de {tarefa['origem']} para {tarefa['destino']}, demanda {tarefa['demanda']}")
+                print(f"    - {tipo} de {tarefa['origem']} para {tarefa['destino']}, demanda {tarefa['demanda']}")
         
         # Mostra a demanda total da rota
         print(f"  Demanda total: {rota['demanda']}")
         print(f"  Custo total: {custo_rota_especifica(rota, matriz_distancias)}")
-
-
-
-
-
 
 def custo_total_rotas(rotas, matriz_distancias):
     custo_total = 0
@@ -415,7 +382,7 @@ def custo_rota_especifica(rota, matriz_distancias):
     return custo_total
 
 
-def imprimir_resultados(rotas_finais, tarefas, matriz_distancias, IdsRequireds, IdsRequiredsEA, optimal_value=None, custo_melhorado=False):
+def imprimir_resultados(rotas_finais, tarefas, matriz_distancias, optimal_value=None, custo_melhorado=False):
     # Cálculos antes da melhoria
     custo_solucao = custo_total_rotas(rotas_finais, matriz_distancias)
     
@@ -443,23 +410,30 @@ def imprimir_resultados(rotas_finais, tarefas, matriz_distancias, IdsRequireds, 
         print(f"- Custo melhorado da solução: {custo_melhorado}")
     
     print("\n- Rotas finais encontradas:\n")
-    mostrar_caminho(rotas_finais, tarefas, matriz_distancias, IdsRequireds, IdsRequiredsEA)
+    mostrar_caminho(rotas_finais, tarefas, matriz_distancias)
 
 
-def rodar_varias_vezes(required_edges, required_arcs, required_vertices, depot_node, num_vehicles, capacity, matriz_distancias, matriz_predecessores, num_execucoes=10000):
+def rodar_varias_vezes(required_edges, required_arcs, required_vertices,
+                       depot_node, num_vehicles, capacity,
+                       matriz_distancias, matriz_predecessores,
+                       num_execucoes=10000, master_seed=None):
+    rng = random.Random(master_seed)
+
     melhor_custo = float('inf')
     melhor_seed = None
     melhor_rotas = None
     melhor_tarefas = None
 
     for _ in range(num_execucoes):
-        seed = random.randint(0, 1_000_000)
-        rotas, tarefas = orquestrar_clarke_wright(required_edges, required_arcs, required_vertices,
-                                                  depot_node, num_vehicles, capacity,
-                                                  matriz_distancias, matriz_predecessores, seed=seed, shuffle=True)
+        seed = rng.randint(0, 1_000_000)
+        rotas, tarefas = orquestrar_clarke_wright(
+            required_edges, required_arcs, required_vertices,
+            depot_node, num_vehicles, capacity,
+            matriz_distancias, matriz_predecessores,
+            seed=seed, shuffle=True
+        )
         custo = custo_total_rotas(rotas, matriz_distancias)
 
-        # Guarda a melhor solução (menor custo) encontrada durante todas as execuções
         if custo < melhor_custo:
             melhor_custo = custo
             melhor_seed = seed
@@ -469,26 +443,33 @@ def rodar_varias_vezes(required_edges, required_arcs, required_vertices, depot_n
     return melhor_rotas, melhor_seed, melhor_custo
 
 
+    
+file = "Testes/BHW8.dat"
+vertices, edges, arcs, required_vertices, required_edges, required_arcs, num_veicles, capacity, depot_node, optimal_value = read_file(file)
 
-file="Testes/BHW4.dat"
-vertices, edges, arcs, required_vertices, required_edges, required_arcs, num_veicles, capacity, depot_node, optimal_value, IdsRequireds, IdsRequiredsEA = read_file(file)
 matriz_distancias = matriz_menores_distancias(vertices, edges, arcs)
 matriz_pred = matriz_predecessores(vertices, edges, arcs)
 
-        # --- Rodar versão determinística (original) ---
-rotas_deterministicas, tarefas = orquestrar_clarke_wright(
-            required_edges=required_edges,
-            required_arcs=required_arcs,
-            required_vertices=required_vertices,
-            depot_node=depot_node,
-            num_vehicles=num_veicles,
-            capacity=capacity,
-            matriz_distancias=matriz_distancias,
-            matriz_predecessores=matriz_pred
-    )
-print(file)
+# --- Rodar versão aleatória múltiplas vezes ---
+melhor_rotas, melhor_seed, melhor_custo = rodar_varias_vezes(
+    required_edges=required_edges,
+    required_arcs=required_arcs,
+    required_vertices=required_vertices,
+    depot_node=depot_node,
+    num_vehicles=num_veicles,
+    capacity=capacity,
+    matriz_distancias=matriz_distancias,
+    matriz_predecessores=matriz_pred,
+    num_execucoes=100,             # Ajuste esse número conforme desejar
+                                # Escolha uma master seed para reprodutibilidade
+)
+
+print(f"\nMelhor resultado para o arquivo: {file}")
+print(f"Seed que gerou a melhor solução: {melhor_seed}")
+print(f"Custo da melhor solução: {melhor_custo}")
+
+# Extrai tarefas para o imprimir_resultados
 tarefas = extrair_tarefas(required_edges, required_arcs, required_vertices)
-imprimir_resultados(rotas_deterministicas, tarefas, matriz_distancias, IdsRequireds, IdsRequiredsEA, optimal_value)
 
-
-
+# Imprime a melhor solução
+imprimir_resultados(melhor_rotas, tarefas, matriz_distancias, optimal_value)

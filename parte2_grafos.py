@@ -187,41 +187,61 @@ def mostrar_caminho(rotas, tarefas, matriz_distancias):
 
         # Mostra a demanda total da rota
         print(f"  Demanda total: {rota['demanda']}")
-        print(f"  Custo total: {custo_rota_especifica(rota, matriz_distancias)}")
+        print(f"  Custo total: {custo_rota_especifica(rota, tarefas, matriz_distancias)}")
 
 
-def custo_total_rotas(rotas, matriz_distancias):
+def custo_total_rotas(rotas, tarefas, matriz_distancias):
     custo_total = 0
     for rota in rotas:
-        rota_completa = rota['rota_completa']
-        for i in range(len(rota_completa) - 1):
-            origem = rota_completa[i]
-            destino = rota_completa[i + 1]
-            custo_total += matriz_distancias[origem][destino]
+        custo_total += custo_rota_especifica(rota, tarefas, matriz_distancias)
     return custo_total
 
 
-def custo_rota_especifica(rota, matriz_distancias):
+def custo_rota_especifica(rota, tarefas, matriz_distancias):
+    """
+    Calcula o custo total da rota considerando:
+    - soma do custo de serviço das tarefas da rota
+    - soma do custo de transporte dos deslocamentos entre nós, excluindo os custos de transporte das tarefas realizadas (pois já são contabilizados via custo de serviço)
+    """
     custo_total = 0
-    rota_completa = rota['rota_completa']
 
+    # Somar custo de serviço das tarefas
+    for tarefa_id in rota['tarefas']:
+        tarefa = tarefas[tarefa_id]
+        custo_total += tarefa['custo_servico']
+
+    # Somar custo total do transporte na rota completa
+    rota_completa = rota['rota_completa']
+    transporte_total = 0
     for i in range(len(rota_completa) - 1):
         origem = rota_completa[i]
         destino = rota_completa[i + 1]
-        custo_total += matriz_distancias[origem][destino]
+        transporte_total += matriz_distancias[origem][destino]
+
+    # Agora descontar o custo de transporte das tarefas realizadas, pois esse custo está incluso no custo de serviço
+    transporte_das_tarefas = 0
+    for tarefa_id in rota['tarefas']:
+        tarefa = tarefas[tarefa_id]
+        transporte_das_tarefas += tarefa['t_cost']
+
+    transporte_total -= transporte_das_tarefas
+
+    custo_total += transporte_total
 
     return custo_total
 
+
 def rodar_varias_vezes(required_edges, required_arcs, required_vertices,
                        depot_node, num_vehicles, capacity,
-                       matriz_distancias, matriz_predecessores,
-                       num_execucoes=10000, master_seed=None):
+                       matriz_distancias, matriz_predecessores, clockInit,
+                       num_execucoes=10, master_seed=None):
     rng = random.Random(master_seed)
 
     melhor_custo = float('inf')
     melhor_seed = None
     melhor_rotas = None
     melhor_tarefas = None
+    melhor_clock_sol = None
 
     for _ in range(num_execucoes):
         seed = rng.randint(0, 1_000_000)
@@ -231,15 +251,17 @@ def rodar_varias_vezes(required_edges, required_arcs, required_vertices,
             matriz_distancias, matriz_predecessores,
             seed=seed, shuffle=True
         )
-        custo = custo_total_rotas(rotas, matriz_distancias)
-
+        custo = custo_total_rotas(rotas, tarefas, matriz_distancias)
+        clock_solucao = time.perf_counter_ns()
+        clock_solucao = clock_solucao-clockInit
         if custo < melhor_custo:
             melhor_custo = custo
             melhor_seed = seed
             melhor_rotas = rotas
             melhor_tarefas = tarefas
+            melhor_clock_sol = clock_solucao
 
-    return melhor_rotas, melhor_seed, melhor_custo
+    return melhor_rotas, melhor_seed, melhor_custo, melhor_clock_sol
 
 
 

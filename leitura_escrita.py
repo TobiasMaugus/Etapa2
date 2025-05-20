@@ -133,19 +133,16 @@ def export_dat(rotas, tarefas, matriz_distancias, custo_total, total_clock_refer
         id_rota = idx + 1
         demanda_total = rota['demanda']
         rota_completa = rota['rota_completa']
-        custo = p2.custo_rota_especifica(rota, matriz_distancias)
+        custo = p2.custo_rota_especifica(rota, tarefas, matriz_distancias)
         num_visitas_deposito = rota['rota_completa'].count(rota_completa[0])
         visitas = len(rota['tarefas']) + num_visitas_deposito
         lista_aux = []
 
         if len(rota_completa) >= 2:
             inicioRota = rota_completa[0]
-            destinoInicioRota = rota_completa[1]
-            fimRota = rota_completa[-1]
-            origemFimRota = rota_completa[-2]
 
             # Adiciona tripla "D" do início da rota
-            lista_aux.append(f"(D 0,{inicioRota},{destinoInicioRota})")
+            lista_aux.append(f"(D 0,{inicioRota},{inicioRota})")
 
         # Triplas das tarefas
         for tarefa_idx in rota['tarefas']:
@@ -173,7 +170,7 @@ def export_dat(rotas, tarefas, matriz_distancias, custo_total, total_clock_refer
 
         if len(rota_completa) >= 2:
             # Adiciona tripla "D" do fim da rota
-            lista_aux.append(f"(D 0,{origemFimRota},{fimRota})")
+            lista_aux.append(f"(D 0,{inicioRota},{inicioRota})")
         lista_aux_string = ' '.join(str(item) for item in lista_aux)
         linhas_rotas.append(f"0 1 {id_rota} {demanda_total} {custo:.2f} {visitas} {lista_aux_string}")
     # Cabeçalho
@@ -186,17 +183,3 @@ def export_dat(rotas, tarefas, matriz_distancias, custo_total, total_clock_refer
 
     with open(nome_arquivo, 'w') as f:
         f.write("\n".join(conteudo))
-
-
-def leitura_referencias(arq_excel="reference_values.csv"):
-    import csv
-    resultado = {}
-    with open('reference_values.csv', newline='', encoding='utf-8') as f:
-        leitor = csv.reader(f)
-        next(leitor)
-        for linha in leitor:
-            if len(linha) >= 5:
-                nome = linha[0]
-                clocks_melhor_sol = linha[4]
-                resultado[nome] = int(clocks_melhor_sol)
-    return resultado
